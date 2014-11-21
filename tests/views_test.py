@@ -1,10 +1,33 @@
 import re
 import pytest
-import requests
 import urllib
-import flask.ext.login as flask_login
+import datetime
 from redwind.models import User
-from unittest.mock import Mock, patch
+
+
+def assert_urls_match(u1, u2):
+    p1 = urllib.parse.urlparse(u1)
+    p2 = urllib.parse.urlparse(u2)
+    assert p1.scheme == p2.scheme
+    assert p1.netloc == p2.netloc
+    assert p1.path == p2.path
+    assert urllib.parse.parse_qs(p1.query) == urllib.parse.parse_qs(p2.query)
+
+
+class FakeResponse:
+    def __init__(self, text='', status_code=200, url=None):
+        self.text = text
+        self.status_code = status_code
+        self.content = text and bytes(text, 'utf8')
+        self.url = url
+        self.headers = {'content-type': 'text/html'}
+
+    def __repr__(self):
+        return 'FakeResponse(status={}, text={}, url={})'.format(
+            self.status_code, self.text, self.url)
+
+    def raise_for_status(self):
+        pass
 
 
 def test_empty_db(client):
@@ -13,8 +36,10 @@ def test_empty_db(client):
     assert '<article' not in rv.get_data(as_text=True)
 
 
-def test_create_post(client, auth):
+def test_create_post(client, auth, mocker):
     """Create a simple post as the current user"""
+    mocker.patch('requests.get').return_value = FakeResponse()
+    mocker.patch('redwind.queue.enqueue')
     rv = client.post('/save_new', data={
         'post_type': 'note',
         'content': 'This is a test note'})
@@ -25,8 +50,11 @@ def test_create_post(client, auth):
     assert 'This is a test note' in rv.get_data(as_text=True)
 
 
-@pytest.fixture(scope='module')
-def silly_posts(client, auth):
+@pytest.fixture
+def silly_posts(client, auth, mocker):
+    mocker.patch('requests.get').return_value = FakeResponse()
+    mocker.patch('redwind.queue.enqueue')
+
     data = [
         {
             'post_type': 'note',
@@ -48,11 +76,13 @@ def silly_posts(client, auth):
             'post_type': 'like',
             'like_of': 'https://mal.colm/reynolds',
             'tags': 'firefly',
+            'hidden': True,
         },
         {
             'post_type': 'like',
             'like_of': 'https://buf.fy/summers/',
             'tags': 'buffy',
+            'hidden': True,
         },
         {
             'post_type': 'article',
@@ -79,6 +109,12 @@ def test_posts_by_type(client, silly_posts):
     assert re.search('u-like-of.*https://buf\.fy/summers', text)
 
 
+def test_posts_everything(client, silly_posts):
+    text = client.get('/everything').get_data(as_text=True)
+    assert 'https://mal.colm/reynolds' in text
+    assert 'https://buf.fy/summers' in text
+
+
 def test_posts_atom(client, silly_posts):
     # check the main feed
     rv = client.get('/', query_string={'feed': 'atom'})
@@ -86,6 +122,14 @@ def test_posts_atom(client, silly_posts):
     assert rv.content_type.startswith('application/atom+xml')
     content = rv.get_data(as_text=True)
     assert 'Probably a &lt;i&gt;dumb&lt;/i&gt; joke' in content
+    assert 'First interesting article' in content
+
+    # check the everything feed
+    rv = client.get('/everything', query_string={'feed': 'atom'})
+    assert 200 == rv.status_code
+    assert rv.content_type.startswith('application/atom+xml')
+    content = rv.get_data(as_text=True)
+    assert 'mal.colm/reynolds' in content  # a hidden post
     assert 'First interesting article' in content
 
     # check the notes feed
@@ -109,25 +153,33 @@ def test_atom_redirects(client):
     assert rv.location.endswith('/articles?feed=atom')
 
 
-class FakeResponse:
-    def __init__(self, text=None, status_code=200, url=None):
-        self.text = text
-        self.status_code = status_code
-        self.content = text and bytes(text, 'utf8')
-        self.url = url
+def test_upload_image(client, mocker):
+    today = datetime.date.today()
+    mocker.patch('requests.get')
+    mocker.patch('redwind.queue.enqueue')
 
-    def __repr__(self):
-        return 'FakeResponse(status={}, text={}, url={})'.format(
-            self.status_code, self.text, self.url)
+    rv = client.post('/save_new', data={
+        'photo': open('tests/image.jpg', 'rb'),
+        'post_type': 'photo',
+        'content': 'High score',
+    })
 
+    assert rv.status_code == 302
+    assert (rv.location == 'http://example.com/{}/{:02d}/high-score'.format(
+        today.year, today.month))
+    permalink = rv.location
 
-def assert_urls_match(u1, u2):
-    p1 = urllib.parse.urlparse(u1)
-    p2 = urllib.parse.urlparse(u2)
-    assert p1.scheme == p2.scheme
-    assert p1.netloc == p2.netloc
-    assert p1.path == p2.path
-    assert urllib.parse.parse_qs(p1.query) == urllib.parse.parse_qs(p2.query)
+    rv = client.get(permalink)
+    assert rv.status_code == 200
+    content = rv.get_data(as_text=True)
+
+    assert 'High score' in content
+    assert '<img' in content
+
+    rv = client.get(permalink + '/files/image.jpg')
+    assert rv.status_code == 200
+    rv = client.get(permalink + '/files/image.jpg?size=small')
+    assert rv.status_code == 200
 
 
 def test_indieauth_login(app, client, mocker):
@@ -138,7 +190,7 @@ def test_indieauth_login(app, client, mocker):
 
     mock_get.return_value = FakeResponse('<html></html>')
     rv = client.get('/login?me=http://example.com')
-    
+
     assert rv.status_code == 302
     assert_urls_match(rv.location,
                       'https://indieauth.com/auth?' + urllib.parse.urlencode({
