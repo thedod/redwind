@@ -191,9 +191,8 @@ class Post(db.Model):
     def load_by_historic_path(cls, path):
         return cls.query.filter_by(historic_path=path).first()
 
-    def __init__(self, post_type, date_index=None):
+    def __init__(self, post_type):
         self.post_type = post_type
-        self.date_index = date_index
         self.draft = False
         self.deleted = False
         self.hidden = False
@@ -383,9 +382,8 @@ class Mention(db.Model):
     reftype = db.Column(db.String(32))
     posts = db.relationship('Post', secondary=posts_to_mentions)
 
-    def __init__(self, post_path):
+    def __init__(self):
         self.index = None
-        self.post_path = post_path
         self.url = None
         self.permalink = None
         self.author_name = None
