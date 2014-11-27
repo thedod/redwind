@@ -234,8 +234,8 @@ def create_context(url):
     app.logger.debug('received response from twitter: %s', status_data)
     pub_date = datetime.datetime.strptime(status_data['created_at'],
                                           '%a %b %d %H:%M:%S %z %Y')
-    #if pub_date and pub_date.tzinfo:
-    #    pub_date = pub_date.astimezone(datetime.timezone.utc)
+    # if pub_date and pub_date.tzinfo:
+    #     pub_date = pub_date.astimezone(datetime.timezone.utc)
     real_name = status_data['user']['name']
     screen_name = status_data['user']['screen_name']
     author_name = real_name
@@ -245,7 +245,7 @@ def create_context(url):
     else:
         author_url = 'https://twitter.com/{}'.format(screen_name)
     author_image = status_data['user']['profile_image_url']
-    tweet_text = expand_links(status_data['text'])
+    tweet_text = expand_links(status_data)
 
     # remove `_normal` from author image to get full-size photo
     author_image = re.sub('_normal\.(\w+)$', '.\g<1>', author_image)
@@ -267,10 +267,20 @@ def create_context(url):
     return context
 
 
-# TODO use twitter API entities to expand links without fetch requests
-def expand_links(text):
-    return util.LINK_RE.sub(lambda match: expand_link(match.group(0)),
-                            text)
+def expand_links(status_data):
+    text = status_data['text']
+    urls = status_data.get('entities', {}).get('urls', [])
+    urls = sorted(
+        urls, key=lambda url_data: url_data['indices'][0], reverse=True)
+    for url_data in urls:
+        app.logger.debug('expanding url: %r', url_data)
+        start_idx = url_data['indices'][0]
+        end_idx = url_data['indices'][1]
+        text = (text[:start_idx]
+                + '<a href="{}">{}</a>'.format(url_data['expanded_url'],
+                                               url_data['display_url'])
+                + text[end_idx:])
+    return text
 
 
 def expand_link(url):
