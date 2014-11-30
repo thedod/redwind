@@ -36,7 +36,10 @@ article {
 }
 
 article + article {
-    margin-top: 150px;
+    margin-top: 30px;
+    padding-top: 30px;
+    border-top: dashed #ccc 1px
+    
 }
 
 
