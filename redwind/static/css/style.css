@@ -470,3 +470,16 @@ footer {
 footer #indie_auth_url {
     display: inline;
 }
+
+/* ----------- Link to top ----------- */
+
+#link-to-top {
+    background-color: rgba(127, 127, 127,0.2);
+    box-shadow: 0 0 2px #ddd;
+    position:fixed;
+    right:8px;
+    bottom:8px;
+    padding: 2px;
+    text-align: center;
+    z-index:666;
+}
