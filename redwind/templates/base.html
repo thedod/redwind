@@ -2,7 +2,7 @@
 {% block body %}
 
   <nav>
-    <span class="site-title">{{ settings.site_title }}</span>
+    <a class="site-title" href="#about">{{ settings.site_title }}</a>
     <a href="{{url_for('index')}}">Stream</a>
     <a href="{{url_for('posts_by_type', plural_type='articles')}}">Articles</a>
     <a href="{{url_for('posts_by_type', plural_type='photos')}}">Photos</a>
@@ -49,9 +49,9 @@
 
   <footer>
 
-    <div class="social">
+    <div id="about" class="social">
       <div class="p-author h-card">
-        <img class="u-photo" alt="me" src="{{ settings.author_image }}"/>
+        <a href="#" title="To top of page"><img class="u-photo" alt="me" src="{{ settings.author_image }}"/></a>
         <a class="u-url" href="{{ settings.site_url }}"><span class="p-name">{{ settings.author_name }}</span></a>
       </div> <!-- .h-card -->
       {{ settings.author_bio | safe }}
