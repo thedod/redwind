@@ -589,8 +589,16 @@ def new_post(type):
             post.bookmark_contexts = [contexts.create_context(bookmark_of)]
 
     post.content = request.args.get('content')
+    button_text = {
+        'publish': 'Publish',
+        'publish_quietly': 'Publish Quietly',
+        'publish+tweet': 'Publish & Tweet',
+        'save_draft': 'Save as Draft',
+    }
+
     return render_template('edit_' + type + '.html', edit_type='new',
-                           post=post, top_tags=get_top_tags(20))
+                           post=post, top_tags=get_top_tags(20),
+                           button_text=button_text)
 
 
 @app.route('/edit')
@@ -602,8 +610,25 @@ def edit_by_id():
     type = 'post'
     if not request.args.get('advanced') and post.post_type:
         type = post.post_type
+
+    if post.draft:
+        button_text = {
+            'publish': 'Publish Draft',
+            'publish_quietly': 'Publish Draft Quietly',
+            'publish+tweet': 'Publish Draft & Tweet',
+            'save_draft': 'Resave Draft',
+        }
+    else:
+        button_text = {
+            'publish': 'Republish',
+            'publish_quietly': 'Republish Quietly',
+            'publish+tweet': 'Republish & Tweet',
+            'save_draft': 'Unpublish, Save as Draft',
+        }
+
     return render_template('edit_' + type + '.html', edit_type='edit',
-                           post=post, top_tags=get_top_tags(20))
+                           post=post, top_tags=get_top_tags(20),
+                           button_text=button_text)
 
 
 @app.route('/uploads')
@@ -774,7 +799,7 @@ def save_post(post):
     # redirect to the view
     post.title = request.form.get('title', '')
     post.content = request.form.get('content')
-    post.draft = request.form.get('action') == 'Save Draft'
+    post.draft = request.form.get('action') == 'save_draft'
     post.hidden = request.form.get('hidden', 'false') == 'true'
 
     venue_name = request.form.get('new_venue_name')
@@ -1036,7 +1061,7 @@ def venue_by_slug(slug):
     return render_template('venue.html', venue=venue, posts=posts)
 
 
-@app.route('/venues')
+@app.route('/venue/')
 def all_venues():
     venues = Venue.query.all()
     return render_template('all_venues.html', venues=venues)
