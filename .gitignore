@@ -26,3 +26,5 @@ redwind/templates/custom_*
 config.py
 .coverage
 htmlcov
+redwind/static/mirror
+redwind/static/map
