@@ -19,7 +19,7 @@ def test_create_post(client, auth, mocker):
     rv = client.post('/save_new', data={
         'post_type': 'note',
         'content': 'This is a test note',
-        'action': 'Publish Quietly',
+        'action': 'publish_quietly',
     })
     assert 302 == rv.status_code
     assert re.match('.*/\d+/\d+/this-is-a-test-note$', rv.location)
@@ -50,11 +50,12 @@ def silly_posts(client, auth, mocker):
             'post_type': 'reply',
             'in_reply_to': 'http://foo.com/bar',
             'content': 'This foo article on bar is really great',
+            'tags': 'good',
         },
         {
             'post_type': 'like',
             'like_of': 'https://mal.colm/reynolds',
-            'tags': 'firefly',
+            'tags': 'firefly,interesting',
             'hidden': True,
         },
         {
@@ -72,7 +73,7 @@ def silly_posts(client, auth, mocker):
     ]
 
     for datum in data:
-        datum['action'] = 'Publish Quietly'
+        datum['action'] = 'publish_quietly'
         rv = client.post('/save_new', data=datum)
         assert 302 == rv.status_code
 
@@ -81,7 +82,6 @@ def test_tagged_posts(client, silly_posts):
     text = client.get('/tag/interesting').get_data(as_text=True)
     assert 'First interesting article' in text
     assert 'Second interesting article' in text
-
 
 def test_posts_by_type(client, silly_posts):
     text = client.get('/likes').get_data(as_text=True)
@@ -131,6 +131,14 @@ def test_posts_atom(client, silly_posts):
     assert 'Probably a &lt;i&gt;dumb&lt;/i&gt; joke' in content
     assert 'First interesting article' not in content
 
+def test_tag_cloud(client, silly_posts):
+    # check the tag cloud
+    rv = client.get('/tag')
+    assert 200 == rv.status_code
+    content = rv.get_data(as_text=True)
+    print(content)
+    assert re.search('<a[^>]*title="2"[^>]*>good', content)
+    assert re.search('<a[^>]*title="3"[^>]*>interesting', content)
 
 def test_atom_redirects(client):
     rv = client.get('/all.atom')
@@ -155,7 +163,7 @@ def test_upload_image(client, mocker):
         'photo': (open('tests/image.jpg', 'rb'), 'image.jpg', 'image/jpeg'),
         'post_type': 'photo',
         'content': 'High score',
-        'action': 'Publish Quietly',
+        'action': 'publish_quietly',
     })
 
     assert rv.status_code == 302

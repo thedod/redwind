@@ -82,6 +82,23 @@ def collect_posts(post_types, page, per_page, tag,
     posts = [post for post in posts if check_audience(post)]
     return posts, is_first, is_last
 
+# Font sizes in em. Maybe should be configurable
+MIN_TAG_SIZE = 1.0
+MAX_TAG_SIZE = 4.0
+MIN_TAG_COUNT = 2
+
+def render_tags(title, tags):
+    counts = [tag['count'] for tag in tags]
+    mincount,maxcount = min(counts),max(counts)
+    for tag in tags:
+        if maxcount>mincount:
+            tag['size'] = (MIN_TAG_SIZE+
+                (MAX_TAG_SIZE-MIN_TAG_SIZE)*
+                (tag['count']-mincount)/
+                (maxcount-mincount))
+        else:
+            tag['size'] = MIN_TAG_SIZE
+    return render_template('tags.html', tags=tags, title=title, max_tag_size=MAX_TAG_SIZE)
 
 def render_posts(title, posts, page, is_first, is_last):
     atom_args = request.view_args.copy()
@@ -140,6 +157,21 @@ def posts_by_type(plural_type, page):
         return render_posts_atom(title, plural_type + '.atom', posts)
     return render_posts(title, posts, page, is_first, is_last)
 
+from sqlalchemy import func,and_
+
+@app.route('/tag')
+def tag_cloud():
+    query = db.session.query(Tag.name,func.count(Post.id)).join(Tag.posts)
+    query = query.filter(Post.deleted==False)
+    if not flask_login.current_user.is_authenticated():
+        query = query.filter(Post.draft==False)
+    query = query.group_by(Tag.id).order_by(Tag.name)
+    query = query.having(func.count(Post.id)>=MIN_TAG_COUNT)
+    tags = [
+        {"name":name,"count":count}
+        for name,count in query.all()
+    ]
+    return render_tags("Tags", tags)
 
 @app.route('/tag/<tag>', defaults={'page': 1})
 @app.route('/tag/<tag>/page/<int:page>')
@@ -557,8 +589,16 @@ def new_post(type):
             post.bookmark_contexts = [contexts.create_context(bookmark_of)]
 
     post.content = request.args.get('content')
+    button_text = {
+        'publish': 'Publish',
+        'publish_quietly': 'Publish Quietly',
+        'publish+tweet': 'Publish & Tweet',
+        'save_draft': 'Save as Draft',
+    }
+
     return render_template('edit_' + type + '.html', edit_type='new',
-                           post=post, top_tags=get_top_tags(20))
+                           post=post, top_tags=get_top_tags(20),
+                           button_text=button_text)
 
 
 @app.route('/edit')
@@ -570,8 +610,25 @@ def edit_by_id():
     type = 'post'
     if not request.args.get('advanced') and post.post_type:
         type = post.post_type
+
+    if post.draft:
+        button_text = {
+            'publish': 'Publish Draft',
+            'publish_quietly': 'Publish Draft Quietly',
+            'publish+tweet': 'Publish Draft & Tweet',
+            'save_draft': 'Resave Draft',
+        }
+    else:
+        button_text = {
+            'publish': 'Republish',
+            'publish_quietly': 'Republish Quietly',
+            'publish+tweet': 'Republish & Tweet',
+            'save_draft': 'Unpublish, Save as Draft',
+        }
+
     return render_template('edit_' + type + '.html', edit_type='edit',
-                           post=post, top_tags=get_top_tags(20))
+                           post=post, top_tags=get_top_tags(20),
+                           button_text=button_text)
 
 
 @app.route('/uploads')
@@ -742,7 +799,7 @@ def save_post(post):
     # redirect to the view
     post.title = request.form.get('title', '')
     post.content = request.form.get('content')
-    post.draft = request.form.get('action') == 'Save Draft'
+    post.draft = request.form.get('action') == 'save_draft'
     post.hidden = request.form.get('hidden', 'false') == 'true'
 
     venue_name = request.form.get('new_venue_name')
@@ -802,7 +859,8 @@ def save_post(post):
 
     tags = request.form.get('tags', '').split(',')
     tags = list(filter(None, map(util.normalize_tag, tags)))
-    post.tags = [Tag(tag) for tag in tags]
+    post.tags = [Tag.query.filter_by(name=tag).first() or Tag(tag)
+                 for tag in tags]
 
     slug = request.form.get('slug')
     if slug:
@@ -971,7 +1029,7 @@ def save_contact(contact):
     for nick in contact.nicks:
         db.session.delete(nick)
     db.session.commit()
-    
+
     contact.nicks = [Nick(name=nick.strip())
                      for nick
                      in request.form.get('nicks', '').split(',')
@@ -1003,7 +1061,7 @@ def venue_by_slug(slug):
     return render_template('venue.html', venue=venue, posts=posts)
 
 
-@app.route('/venues')
+@app.route('/venue/')
 def all_venues():
     venues = Venue.query.all()
     return render_template('all_venues.html', venues=venues)

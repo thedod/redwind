@@ -99,7 +99,7 @@ def collect_images(post):
     else:
         html = util.markdown_filter(
             post.content, img_path=post.get_image_path(),
-            person_processor=None)
+            url_processor=None, person_processor=None)
         soup = BeautifulSoup(html)
         for img in soup.find_all('img'):
             if not img.find_parent(class_='h-card'):
@@ -112,7 +112,7 @@ def send_to_twitter(post, args):
     """Share a note to twitter without user-input. Makes a best-effort
     attempt to guess the appropriate parameters and content
     """
-    if args.get('action') == 'Publish + Tweet':
+    if args.get('action') == 'publish+tweet':
         if not is_twitter_authorized():
             return False, 'Current user is not authorized to tweets'
 
@@ -128,10 +128,26 @@ def send_to_twitter(post, args):
 
 def do_send_to_twitter(post_id):
     with app.app_context():
-        app.logger.debug("auto-posting to twitter for {}".format(post_id))
+        app.logger.debug('auto-posting to twitter for %s', post_id)
         post = Post.load_by_id(post_id)
 
         in_reply_to, repost_of, like_of = posse_post_discovery(post)
+
+        # cowardly refuse to auto-POSSE a reply/repost/like when the
+        # target tweet is not found.
+        if post.in_reply_to and not in_reply_to:
+            app.logger.warn('could not find tweet to reply to for %s',
+                            post.in_reply_to)
+            return None
+        if post.repost_of and not repost_of:
+            app.logger.warn('could not find tweet to repost for %s',
+                            post.repost_of)
+            return None
+        if post.like_of and not like_of:
+            app.logger.warn('could not find tweet to like for %s',
+                            post.like_of)
+            return None
+
         preview, img_url = guess_tweet_content(post, in_reply_to)
         response = do_tweet(
             post_id, preview, img_url, in_reply_to, repost_of, like_of)
@@ -180,12 +196,16 @@ def share_on_twitter():
 
 
 def format_markdown_as_tweet(data):
-    def person_to_twitter_handle(contact, nick):
+    def person_to_twitter_handle(contact, nick, soup):
+        """Attempt to replace friendly @name with the official @twitter username
+        """
         if contact and contact.social:
             nick = contact.social.get('twitter') or nick
         return '@' + nick
     return util.format_as_text(
-        util.markdown_filter(data, person_processor=person_to_twitter_handle))
+        util.markdown_filter(
+            data, url_processor=None,
+            person_processor=person_to_twitter_handle))
 
 
 def get_auth():
