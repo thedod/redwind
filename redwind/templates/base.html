@@ -2,7 +2,7 @@
 {% block body %}
 
   <nav>
-    <a class="site-title" href="#about">{{ settings.site_title }}</a>
+    <span class="site-title">{{ settings.site_title }}</span>
     <a href="{{url_for('index')}}">Stream</a>
     <a href="{{url_for('posts_by_type', plural_type='articles')}}">Articles</a>
     <a href="{{url_for('posts_by_type', plural_type='photos')}}">Photos</a>
@@ -12,6 +12,7 @@
     <a href="{{url_for('tag_cloud')}}">Tags</a>
     <a href="{{url_for('mentions')}}">Mentions</a>
     <a href="{{url_for('contacts')}}">Contacts</a>
+    <a href="#about">About</a>
   </nav>
 
   {% if current_user.is_authenticated() %}
