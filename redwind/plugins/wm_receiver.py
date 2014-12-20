@@ -1,13 +1,10 @@
 from .. import app
 from .. import db
 from .. import queue
-from .. import redis
 from .. import util
 from ..models import Post, Mention, get_settings
 from bs4 import BeautifulSoup
-from flask import request, make_response, render_template, url_for
-from werkzeug.exceptions import NotFound
-from rq.job import Job
+from flask import request, make_response, render_template, url_for, abort
 from werkzeug.exceptions import NotFound
 import datetime
 import mf2py
@@ -42,8 +39,8 @@ def receive_webmention():
 
     app.logger.debug("Webmention from %s to %s received", source, target)
 
-    job = queue.enqueue(process_webmention, source, target, callback)
-    status_url = url_for('webmention_status', key=job.id, _external=True)
+    key = queue.enqueue(process_webmention, source, target, callback)
+    status_url = url_for('webmention_status', key=key, _external=True)
 
     return make_response(
         render_template('wm_received.html', status_url=status_url), 202)
@@ -51,72 +48,81 @@ def receive_webmention():
 
 @app.route('/webmention/status/<key>')
 def webmention_status(key):
-    job = Job.fetch(key, connection=redis)
-    rv = job.result
-    if not rv:
+    job = queue.Job.query.filter_by(key=key).first()
+
+    if job:
+        rv = job.result
+        if not rv:
+            rv = {
+                'response_code': 202,
+                'status': 'queued',
+                'reason': 'Mention has been queued for processing',
+            }
+    else:
         rv = {
-            'response_code': 202,
-            'status': 'queued',
-            'reason': 'Mention has not been processed or status has expired'
+            'response_code': 400,
+            'status': 'unknown',
+            'reason': 'Job does not exist or its status has expired',
         }
+
     return make_response(
-        render_template('wm_status.html', **rv),
-        rv.get('response_code', 400))
+       render_template('wm_status.html', **rv),
+       rv.get('response_code', 400))
 
 
 def process_webmention(source, target, callback):
     def call_callback(result):
         if callback:
             requests.post(callback, data=result)
-    with app.app_context():
-        try:
-            target_post, mention, delete, error = do_process_webmention(
-                source, target)
 
-            if error or not target_post or not mention:
-                app.logger.warn("Failed to process webmention: %s", error)
-                result = {
-                    'source': source,
-                    'target': target,
-                    'response_code': 400,
-                    'status': 'error',
-                    'reason': error
-                }
-                call_callback(result)
-                return result
+    try:
+        target_post, mention, delete, error = do_process_webmention(
+            source, target)
 
-            if delete:
-                target_post.mentions = [m for m in target_post.mentions if
-                                        m.url != source]
-
-            if not delete:
-                target_post.mentions.append(mention)
-
-            db.session.commit()
-            app.logger.debug("saved mentions to %s", target_post.path)
-
-            result = {
-                'source': source,
-                'target': target,
-                'response_code': 200,
-                'status': 'success',
-                'reason': 'Deleted' if delete else 'Created'
-            }
-
-            call_callback(result)
-            return result
-
-        except Exception as e:
-            app.logger.exception("exception while processing webmention")
+        if error or not target_post or not mention:
+            app.logger.warn("Failed to process webmention: %s", error)
             result = {
                 'source': source,
                 'target': target,
                 'response_code': 400,
                 'status': 'error',
-                'reason': "exception while processing webmention {}".format(e)
+                'reason': error
             }
             call_callback(result)
             return result
+
+        if delete:
+            target_post.mentions = [m for m in target_post.mentions if
+                                    m.url != source]
+
+        if not delete:
+            target_post.mentions.append(mention)
+
+        db.session.commit()
+        app.logger.debug("saved mentions to %s", target_post.path)
+
+        result = {
+            'source': source,
+            'target': target,
+            'response_code': 200,
+            'status': 'success',
+            'reason': 'Deleted' if delete else 'Created'
+        }
+
+        call_callback(result)
+        return result
+
+    except Exception as e:
+        app.logger.exception("exception while processing webmention")
+        result = {
+            'source': source,
+            'target': target,
+            'response_code': 400,
+            'status': 'error',
+            'reason': "exception while processing webmention {}".format(e)
+        }
+        call_callback(result)
+        return result
 
 
 def do_process_webmention(source, target):
@@ -307,4 +313,5 @@ def create_mention(post, url, source_response):
     mention.published = published
     mention.title = entry.get('name')
     mention.syndication = entry.get('syndication', [])
+    mention.rsvp = entry.get('rsvp')
     return mention

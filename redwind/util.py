@@ -5,6 +5,7 @@ from markdown import markdown
 from smartypants import smartyPants
 import bleach
 import bs4
+import codecs
 import datetime
 import jwt
 import os
@@ -15,6 +16,8 @@ import requests
 import shutil
 import unicodedata
 import urllib
+import hmac
+import hashlib
 
 bleach.ALLOWED_TAGS += ['img', 'p', 'br', 'marquee', 'blink']
 bleach.ALLOWED_ATTRIBUTES.update({
@@ -39,7 +42,7 @@ LINK_RE = re.compile(
     # hostname and port
     r'((?:[a-z0-9\-]+\.)+[a-z]{2,4}(?::\d{2,6})?'
     # path
-    r'(?:/(?:[a-zA-Z0-9\-_~.;:$?&%#@()/=]*[a-zA-Z0-9\-_$?#/])?)?)\b'
+    r'(?:(?:/(?:[a-zA-Z0-9\-_~.;:$?&%#@()/=]*[a-zA-Z0-9\-_$?#/])?)|\b))'
 )
 
 
@@ -127,7 +130,7 @@ def person_to_microcard(contact, nick, soup):
 
         image = contact.image
         if image:
-            image = mirror_image(image, 26)
+            image = construct_imageproxy_url(image, 26)
             image_tag = soup.new_tag('img', src=image)
             a_tag.append(image_tag)
             a_tag.append(contact.name)
@@ -278,37 +281,6 @@ def base60_decode(s):
     return n
 
 
-def resize_image(source, target, side):
-    from PIL import Image, ExifTags
-    if not os.path.exists(target):
-        if not os.path.exists(os.path.dirname(target)):
-            os.makedirs(os.path.dirname(target))
-
-        im = Image.open(source)
-        orientation = next((k for k, v in ExifTags.TAGS.items()
-                            if v == 'Orientation'), None)
-
-        if hasattr(im, '_getexif') and im._getexif():
-            exif = dict(im._getexif().items())
-            if orientation in exif:
-                if exif[orientation] == 3:
-                    im = im.transpose(Image.ROTATE_180)
-                elif exif[orientation] == 6:
-                    im = im.transpose(Image.ROTATE_270)
-                elif exif[orientation] == 8:
-                    im = im.transpose(Image.ROTATE_90)
-
-        origw, origh = im.size
-        ratio = side / max(origw, origh)
-        # scale down, not up
-        if ratio >= 1:
-            shutil.copyfile(source, target)
-        else:
-            im = im.resize((int(origw * ratio), int(origh * ratio)),
-                           Image.ANTIALIAS)
-            im.save(target)
-
-
 def slugify(s, limit=256):
     slug = unicodedata.normalize('NFKD', s).lower()
     slug = re.sub(r'[^a-z0-9]+', '-', slug).strip('-')
@@ -329,53 +301,23 @@ def image_root_path():
     return app.config.get('IMAGE_ROOT_PATH', app.root_path)
 
 
-def mirror_image(src, side=None):
-    """Downloads a remote resource schema://domain/path to
-    static/mirror/domain/path and optionally resizes it to
-    static/mirro/domain/dirname(path)/resized-64/basename(path)
-    """
-    from .models import get_settings
-    site_netloc = urllib.parse.urlparse(get_settings().site_url).netloc
-    o = urllib.parse.urlparse(src)
-    if not o.netloc or o.netloc == site_netloc and not side:
-        return src
+def proxy_all_images(html):
+    def repl(m):
+        return m.group(1) + construct_imageproxy_url(m.group(2)) + m.group(3)
 
-    relpath = os.path.join("mirror", o.netloc, o.path.strip('/'))
-    abspath = os.path.join(image_root_path(), app.static_folder, relpath)
+    regex = re.compile(r'(<img[^>]+src=")([^">]+)(")')
+    return regex.sub(repl, html)
 
-    if os.path.exists(abspath):
-        pass
-    elif os.path.exists(abspath + '.error'):
-        return src
-    else:
-        try:
-            download_resource(src, abspath)
-        except BaseException as e:
-            app.logger.exception(
-                "failed to download %s to %s for some reason", src, abspath)
-            if not os.path.exists(os.path.dirname(abspath)):
-                os.makedirs(os.path.dirname(abspath))
-            with open(abspath + '.error', 'w') as f:
-                f.write(str(e))
-            return src
 
-    if not side:
-        return url_for('static', relpath)
-
-    rz_relpath = os.path.join(
-        os.path.dirname(relpath), 'resized-' + str(side),
-        os.path.basename(relpath))
-
-    if not any(rz_relpath.lower().endswith(ext)
-               for ext in ['.gif', '.jpg', '.png']):
-        rz_relpath += '.jpg'
-
-    rz_abspath = os.path.join(image_root_path(), app.static_folder, rz_relpath)
-
-    if not os.path.exists(rz_abspath):
-        resize_image(abspath, rz_abspath, side)
-
-    return url_for('static', filename=rz_relpath)
+def construct_imageproxy_url(src, side=None):
+    size = str(side) if side else 'n'
+    h = hmac.new(app.config['SECRET_KEY'].encode(), digestmod=hashlib.sha1)
+    h.update(size.encode())
+    h.update(src.encode())
+    digest = h.hexdigest()
+    return url_for('imageproxy.image', digest=digest,
+                   size=size,
+                   encoded_url=codecs.encode(src.encode(), 'hex_codec'))
 
 
 def markdown_filter(data, img_path=None, url_processor=url_to_link,
@@ -447,7 +389,7 @@ def prettify_url(url):
         schema, path = split
     else:
         path = url
-    return path.strip('/')
+    return path
 
 
 def fetch_html(url):

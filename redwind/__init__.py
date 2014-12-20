@@ -10,8 +10,6 @@ from flask.ext.sqlalchemy import SQLAlchemy
 from flask.ext.login import LoginManager
 
 from werkzeug.datastructures import ImmutableDict
-from redis import Redis
-from rq import Queue
 from logging import StreamHandler
 from logging.handlers import RotatingFileHandler
 from config import Configuration
@@ -23,9 +21,6 @@ import logging
 app = Flask(__name__)
 app.config.from_object(Configuration)
 
-redis = Redis.from_url(app.config['REDIS_URL'])
-
-queue = Queue(connection=redis)
 db = SQLAlchemy(app)
 
 # toolbar = DebugToolbarExtension(app)
@@ -79,6 +74,11 @@ if not app.debug:
 
 for handler in ['views', 'services', 'micropub']:
     importlib.import_module('redwind.' + handler)
+
+
+# register blueprints
+from .imageproxy import imageproxy
+app.register_blueprint(imageproxy, url_prefix='/imageproxy')
 
 
 for plugin in [

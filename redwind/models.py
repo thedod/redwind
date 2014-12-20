@@ -230,8 +230,9 @@ class Post(db.Model):
         if location:
             lat = location.get('latitude')
             lng = location.get('longitude')
-            return maps.get_map_image(width, height, 13,
-                                      [maps.Marker(lat, lng, 'dot-small-blue')])
+            return maps.get_map_image(
+                width, height, 13,
+                [maps.Marker(lat, lng, 'dot-small-blue')])
 
     def photo_url(self, photo):
         return '/'.join((self.get_image_path(), photo.get('filename')))
@@ -255,6 +256,10 @@ class Post(db.Model):
     @property
     def replies(self):
         return [m for m in self.mentions if m.reftype == 'reply']
+
+    @property
+    def rsvps(self):
+        return [m for m in self.mentions if m.reftype == 'rsvp']
 
     @property
     def references(self):
@@ -309,6 +314,42 @@ class Post(db.Model):
                 and 'longitude' in self.location):
             return OPEN_STREET_MAP_URL.format(self.location['latitude'],
                                               self.location['longitude'])
+
+    @property
+    def mf2_type(self):
+        if self.post_type == 'event':
+            return 'h-event'
+        else:
+            return 'h-entry'
+
+    @property
+    def title_or_fallback(self):
+        """Feeds and <title> attributes require a human-readable
+        title, even for posts that do not have an explicit title. Try
+        here to create a reasonable one.
+        """
+        def format_context(ctx):
+            if ctx.title and ctx.author_name:
+                return '“{}” by {}'.format(ctx.title, ctx.author_name)
+            if ctx.title:
+                return ctx.title
+            if ctx.author_name:
+                return 'a post by {}'.format(ctx.author_name)
+            return util.prettify_url(ctx.permalink)
+
+        if self.title:
+            return self.title
+        if self.post_type == 'checkin' and self.venue:
+            return 'Checked in to {}'.format(self.venue.name)
+        if self.repost_contexts:
+            return 'Shared {}'.format(', '.join(map(format_context, self.repost_contexts)))
+        if self.like_contexts:
+            return 'Liked {}'.format(', '.join(map(format_context, self.like_contexts)))
+        if self.bookmark_contexts:
+            return 'Bookmarked {}'.format(', '.join(map(format_context, self.bookmark_contexts)))
+        if self.content:
+            return util.format_as_text(self.content)
+        return 'A {} from {}'.format(self.post_type, self.published)
 
     def generate_slug(self):
         if self.title:
@@ -394,6 +435,7 @@ class Mention(db.Model):
     title = db.Column(db.String(512))
     syndication = db.Column(JsonType)
     reftype = db.Column(db.String(32))
+    rsvp = db.Column(db.String(32))
     posts = db.relationship('Post', secondary=posts_to_mentions)
 
     def __init__(self):
@@ -408,6 +450,7 @@ class Mention(db.Model):
         self.published = None
         self.title = None
         self.reftype = None
+        self.rsvp = None
         self.syndication = []
         self._children = []
 

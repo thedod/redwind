@@ -11,7 +11,7 @@
 
   <span class="p-author h-card microcard">
     {% if mention.author_image %}
-      <img class="u-photo" src="{{mention.author_image | mirror_image(20) }}" alt="{{mention.author_name}}" />
+      <img class="u-photo" src="{{mention.author_image | imageproxy(20) }}" alt="{{mention.author_name}}" />
     {% endif %}
     {% if mention.author_name and mention.author_url %}
       <a class="p-name u-url" href="{{ mention.author_url }}">
@@ -31,6 +31,19 @@
       <!-- start of foreign content -->
       {{ mention.content | safe }}
       <!-- end of foreign content -->
+    </div>
+  {% elif mention.reftype == 'rsvp' %}
+    <span class="rsvp {{mention.rsvp}}">
+      {% if mention.rsvp == 'yes' %}
+        is going
+      {% elif mention.rsvp == 'maybe' %}
+        might go
+      {% elif mention.rsvp == 'no' %}
+        is not going
+      {% endif %}
+    </span>
+    <div class="e-content">
+      {{ mention.content | safe }}
     </div>
 
   {% elif mention.reftype == 'like' %}
