@@ -179,7 +179,7 @@ def share_on_twitter():
         imgs = list(collect_images(post))
         app.logger.debug('twitter post has images: %s', imgs)
 
-        return render_template('share_on_twitter.html', preview=preview,
+        return render_template('admin/share_on_twitter.jinja2', preview=preview,
                                post=post, in_reply_to=in_reply_to,
                                repost_of=repost_of, like_of=like_of, imgs=imgs)
 
@@ -264,7 +264,8 @@ def create_context(url):
     else:
         author_url = 'https://twitter.com/{}'.format(screen_name)
     author_image = status_data['user']['profile_image_url']
-    tweet_text = expand_links(status_data)
+    tweet_content = expand_links(status_data)
+    tweet_plain = expand_links(status_data, as_html=False)
 
     # remove `_normal` from author image to get full-size photo
     author_image = re.sub('_normal\.(\w+)$', '.\g<1>', author_image)
@@ -273,7 +274,8 @@ def create_context(url):
         if media.get('type') == 'photo':
             media_url = media.get('media_url')
             if media_url:
-                tweet_text += '<div><img src="{}"/></div>'.format(media_url)
+                tweet_content += '<div><img src="{}"/></div>'.format(media_url)
+                tweet_plain += media_url
 
     context = Context()
     context.url = context.permalink = url
@@ -282,11 +284,12 @@ def create_context(url):
     context.author_url = author_url
     context.published = pub_date
     context.title = None
-    context.content = tweet_text
+    context.content = tweet_content
+    context.content_plain = tweet_plain
     return context
 
 
-def expand_links(status_data):
+def expand_links(status_data, as_html=True):
     text = status_data['text']
     urls = status_data.get('entities', {}).get('urls', [])
     urls = sorted(
@@ -295,10 +298,12 @@ def expand_links(status_data):
         app.logger.debug('expanding url: %r', url_data)
         start_idx = url_data['indices'][0]
         end_idx = url_data['indices'][1]
-        text = (text[:start_idx]
-                + '<a href="{}">{}</a>'.format(url_data['expanded_url'],
-                                               url_data['display_url'])
-                + text[end_idx:])
+        if as_html:
+            link_text = '<a href="{}">{}</a>'.format(
+                url_data['expanded_url'], url_data['display_url'])
+        else:
+            link_text = url_data['expanded_url']
+        text = text[:start_idx] + link_text + text[end_idx:]
     return text
 
 
